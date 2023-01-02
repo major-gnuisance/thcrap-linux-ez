@@ -90,15 +90,18 @@ def save_config(config):
 def override_config_defaults():
     "Change some default settings for thcrap"
     config = load_config()
-    # Stop thcrap from running in the background
-    config["background_updates"] = False
-    # Update only the game being launched
-    config["update_others"] = False
-    save_config(config)
+    overrides = {
+        # Stop thcrap from running in the background
+        "background_updates": False,
+        # Update only the game being launched
+        "update_others": False,
+    }
+    save_config(config | overrides)
 
-# Initial setup: run thcrap.exe instead of the game and let the user figure it out
+# Initial setup.
+# Run thcrap.exe instead of the game and let the user figure it out
 if not is_thcrap_installed():
-    args = sys.argv[1:-1] + [path.join(thcrap_dir, "thcrap.exe")]
+    args = sys.argv[1:-1] + [thcrap]
     subprocess.run(args, check=False)
     # Check if it was installed correctly
     if not is_thcrap_installed():
