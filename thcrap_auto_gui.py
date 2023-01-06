@@ -17,6 +17,7 @@ Any configurations you've added will automatically appear in the
 launcher. Click the one you want to use, then "Start Game".
 """
 
+import io
 import os
 import shutil
 import sys
@@ -59,6 +60,12 @@ thcrap = path.join(thcrap_dir, "thcrap.exe")
 thcrap_loader = path.join(thcrap_dir, "thcrap_loader.exe")
 thcrap_config = path.join(thcrap_dir, "config")
 thcrap_configjs = path.join(thcrap_config, "config.js")
+thcrap_update_dll = path.join(thcrap_dir, "bin", "thcrap_update.dll")
+thcrap_update_dll_disabled = thcrap_update_dll.replace(".dll", "_disabled.dll")
+thcrap_steam_dll = path.join(thcrap_dir, "bin", "steam_api.dll")
+thcrap_steam_dll_disabled = thcrap_steam_dll.replace(".dll", "_disabled.dll")
+
+launcher_settings_path = path.join(thcrap_dir, "thcrap_launcher.json")
 
 CONFIG_NAME_MAP = {
     "no patch": "日本語",
@@ -109,32 +116,33 @@ def init_thcrap(thcrap=thcrap,
         else:
             with urllib.request.urlopen(zip_url) as f:
                 data = io.BytesIO(f.read())
-                ZipFile(data).extractall(thcrap_dir)
+            with ZipFile(data) as zipf:
+                zipf.extractall(thcrap_dir)
 
-def load_config():
+def load_json(path):
     """Load config.js, if it exists."""
     # TODO: support JSON5, maybe
     try:
-        with open(thcrap_configjs, encoding="utf-8") as file:
+        with open(path, encoding="utf-8") as file:
             return json.load(file)
     except FileNotFoundError:
         return {}
 
-def save_config(config):
+def save_json(config, path):
     "Save config.js"
-    with open(thcrap_configjs, "w", encoding="utf-8", newline="\r\n") as file:
+    with open(path, "w", encoding="utf-8", newline="\r\n") as file:
         json.dump(config, file, indent=2)
 
 def override_config_defaults():
     "Change some default settings for thcrap"
-    config = load_config()
+    config = load_json(thcrap_configjs)
     overrides = {
         # Stop thcrap from running in the background
         "background_updates": False,
         # Update only the game being launched
         "update_others": False,
     }
-    save_config(config | overrides)
+    save_json(config | overrides, thcrap_configjs)
 
 def is_patch_config_file(path):
     try:
@@ -142,7 +150,7 @@ def is_patch_config_file(path):
             contents = json.load(file)
         return contents.get('patches', None)
     except Exception:
-        return false
+        return False
 
 def list_configs():
     "Return list of available patch configs"
@@ -155,7 +163,7 @@ def list_configs():
             and f.stat().st_size < 2**20
             and is_patch_config_file(path.join(thcrap_config, f.name))
         ]
-    except:
+    except Exception:
         return []
 
 
@@ -167,6 +175,20 @@ def run_thcrap_config():
         override_config_defaults()
     args = sys.argv[1:-1] + [thcrap]
     subprocess.run(args, check=False)
+
+def load_settings():
+    return load_json(launcher_settings_path)
+
+def save_settings(settings):
+    save_json(settings, launcher_settings_path)
+
+def get_lastrun(settings=load_settings()):
+    """Get name of last config used"""
+    return str(settings.get('last_run', 'no_config'))
+
+def set_lastrun(config_name):
+    """Save name of last config used"""
+    save_settings(load_settings() | {'last_run': config_name})
 
 def exec_game(config="en"):
     if config != 'no patch':
@@ -196,6 +218,7 @@ def exec_game(config="en"):
 if gui:
     from tkinter import *
     from tkinter import ttk, font
+    import tkinter.messagebox
     import colorsys
     import types
 
@@ -204,7 +227,8 @@ if gui:
         hx = hx.strip('#')
         n = len(hx) // 3 # nibbles per color
         m = 2 ** (n * 4) - 1 # max value per color
-        hex2float = lambda h: int(h, 16) / m
+        def hex2float(h):
+            return int(h, 16) / m
         return tuple(hex2float(hx[i:i+n])
                      for i in range(0, len(hx), n))
 
@@ -214,6 +238,7 @@ if gui:
         def float2hex(fl):
             i = min(m, max(0, int(fl * m)))
             return format(i, f'0{nibbles}x')
+
         hex = "".join([float2hex(fl) for fl in (r, g, b)])
         return f"#{hex}"
 
@@ -246,7 +271,12 @@ if gui:
             # Make top level frame fill the window
             root.columnconfigure(0, weight=1)
             root.rowconfigure(0, weight=1)
+
+            # Quit on ESC
             root.bind('<Escape>', lambda *_: self.quit())
+
+            # Press buttons with enter key
+            root.bind_class('TButton', '<Return>', ' ttk::button::activate %W')
 
             # Configure top level frame grid.
             # 3 equal columns
@@ -256,7 +286,7 @@ if gui:
             mainframe.rowconfigure(1, weight=1)
 
             self.add_bottom_buttons()
-            
+
             # App name at the top
             ttk.Label(mainframe, text=APP_NAME, style="Main.TLabel")\
                .grid(row=0, columnspan=3)
@@ -277,8 +307,7 @@ if gui:
             # Frame that holds global settings
             settings_frame = ttk.Frame(notebook, padding="20")
             self.settings_frame = settings_frame
-
-            ttk.Label(settings_frame, text="TODO").pack()
+            self.add_settings()
 
             # Add Frames to notebook
             notebook.add(configs_frame, text="Configurations")
@@ -375,7 +404,68 @@ if gui:
             sty.map('Quit.TButton',
                     background=[('active', lighten(color.red))])
 
-                
+            sty.configure('TCheckbutton',
+                          foreground='#f5f5f5', background=color.bg_main,
+                          font=bold_font, borderwidth=2,
+                          relief='flat',
+                          indicatorcolor=color.bg_button,
+                          indicatordiameter=25,
+                          indicatorrelief='flat')
+            sty.map('TCheckbutton',
+                    background=[('active', color.bg_main)],
+                    indicatorcolor=[('selected', color.green)])
+
+        def set_updater(self, enable):
+            if enable and path.exists(thcrap_update_dll_disabled):
+                os.rename(thcrap_update_dll_disabled, thcrap_update_dll)
+                self.updater_var.set(1)
+            elif path.exists(thcrap_update_dll):
+                os.rename(thcrap_update_dll, thcrap_update_dll_disabled)
+                self.updater_var.set(0)
+
+        def set_steamintegration(self, enable):
+            if enable and path.exists(thcrap_steam_dll_disabled):
+                os.rename(thcrap_steam_dll_disabled, thcrap_steam_dll)
+                self.steamintegration_var.set(1)
+            elif path.exists(thcrap_steam_dll):
+                os.rename(thcrap_steam_dll, thcrap_steam_dll_disabled)
+                self.steamintegration_var.set(0)
+
+        def add_settings(self):
+            frame = self.settings_frame
+            gridargs = {
+                'pady': 20,
+                'padx': 20,
+                'sticky': 'w',
+            }
+
+            self.updater_var = IntVar(value=1 if path.exists(thcrap_update_dll) else 0)
+            updater_checkbox = ttk.Checkbutton(
+                frame,
+                text='Thcrap Updater',
+                command=lambda *_: self.set_updater(self.updater_var.get() != 0),
+                variable=self.updater_var)
+            updater_checkbox.grid(**gridargs)
+
+            self.steamintegration_var = IntVar(value=1 if path.exists(thcrap_steam_dll) else 0)
+            steamintegration_checkbox = ttk.Checkbutton(
+                frame,
+                text='Thcrap Steam Integration',
+                command=lambda *_: self.set_steamintegration(self.steamintegration_var.get() != 0),
+                variable=self.steamintegration_var)
+            steamintegration_checkbox.grid(**gridargs)
+
+            self._bugs = IntVar(value=0)
+            bugs = ttk.Checkbutton(
+                frame,
+                text='Disable all bugs',
+                # state='disabled',
+                variable=self._bugs,
+                command=lambda *_: bugs.destroy()
+            )
+            bugs.grid(**gridargs)
+
+
         def add_bottom_buttons(self):
             bottom_buttons = [
                 ttk.Button(self.mainframe,
@@ -398,6 +488,9 @@ if gui:
             for i,b in enumerate(bottom_buttons):
                 b.grid(column=i, **bottom_button_args)
 
+            self.bottom_buttons = bottom_buttons
+            bottom_buttons[2].focus()
+
 
         def run_thcrap(self, *args):
             run_thcrap_config()
@@ -410,11 +503,18 @@ if gui:
             config = self.configvar.get()
             config_name = self.configs[config]
             self.root.destroy()
+            set_lastrun(config_name)
             exec_game(config_name)
 
         def refresh_configs(self, configs=None):
             if configs:
                 self.configs = configs
+
+            try:
+                lastrun = get_lastrun()
+                self.configvar.set(self.configs.index(lastrun))
+            except ValueError:
+                pass
 
             for widget in self.configs_frame.winfo_children():
                 widget.destroy()
@@ -456,15 +556,23 @@ if gui:
 
 
 
-configs = ["no patch", "en", "es", "de", "pt", "zh", "kr", "en_troll", "foo", "bar", "en", "jp", "13", "14", "15"]
+configs = ["no patch", "en", "es", "de", "pt", "zh", "kr", "en_troll",
+           "foo", "bar", "en", "jp"]
 
-if TEST:
-    launcher = Launcher(configs[:2])
-    launcher.refresh_configs([f'Config {i}\n({i})' for i in range(20)])
-elif gui:
-    check_exe(GAME_EXE)
-    init_thcrap()
-    Launcher(['no patch', *list_configs()])
+if gui:
+    try:
+        if TEST:
+            launcher = Launcher(configs[:2])
+            launcher.refresh_configs([f'Config {i}\n({i})' for i in range(20)])
+        else:
+            check_exe(GAME_EXE)
+            init_thcrap()
+            Launcher(['no patch', *list_configs()])
+    except Exception as e:
+        tkinter.messagebox.showerror(
+            title=f'Error in {APP_NAME}',
+            message=f'{APP_NAME} encountered an error and will now exit.\nError: {e}'
+        )
 else:
     check_exe(GAME_EXE)
     init_thcrap()
