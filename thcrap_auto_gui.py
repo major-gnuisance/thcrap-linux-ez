@@ -218,6 +218,7 @@ def exec_game(config="en"):
 if gui:
     from tkinter import *
     from tkinter import ttk, font
+    import tkinter.colorchooser
     import tkinter.messagebox
     import colorsys
     import types
@@ -260,6 +261,19 @@ if gui:
             root.title(APP_NAME)
             root.minsize(800, 600)
             root.geometry('1280x800')
+
+            self.default_color = {
+                'bg_main': '#1f3b3e',
+                'bg_button': '#475a61',
+                'green': '#5abd42',
+                'red': '#bd4242',
+                'fg_1': '#bbb',
+                'fg_2': '#eee',
+            }
+
+            settings = load_settings()
+            
+            self.color = settings.get('color', {})
 
             self.set_style()
 
@@ -320,6 +334,34 @@ if gui:
             if not TEST:
                 root.mainloop()
 
+        def set_color(self, color_name, color):
+            self.color[color_name]=color
+
+        def get_colors(self):
+            return (self.default_color | self.color)
+
+        def get_color(self, color_name):
+            return self.get_colors().get(color_name)
+
+        def save_colors(self):
+            settings = load_settings()
+            settings['color']=self.color
+            save_settings(settings)
+
+        def reset_colors(self):
+            self.color = {}
+            self.set_style()
+            self.add_settings()
+
+        def change_color(self, color_name):
+            """Show color picker and change color."""
+            current_color = self.get_color(color_name)
+            (_, color) = tkinter.colorchooser.askcolor(color=current_color)
+            if color:
+                self.set_color(color_name, color)
+                self.set_style()
+                self.add_settings()
+
         def set_style(self):
             """Define and alter Tk styles"""
 
@@ -339,14 +381,7 @@ if gui:
 
             sty = ttk.Style(self.root)
 
-            color = types.SimpleNamespace(**{
-                'bg_main': '#1f3b3e',
-                'bg_button': '#475a61',
-                'green': '#5abd42',
-                'red': '#bd4242',
-                'fg_1': '#bbb',
-                'fg_2': '#eee',
-            })
+            color = types.SimpleNamespace(**(self.get_colors()))
 
             # Prevents unsightly flashes of white when changing
             # notebook tabs
@@ -396,6 +431,9 @@ if gui:
             sty.map('TButton',
                     background=[('active', lighten(color.bg_button))])
 
+            sty.configure('Setting.TButton',
+                          anchor='w')
+
             sty.configure('Start.TButton', background=color.green)
             sty.map('Start.TButton',
                     background=[('active', lighten(color.green))])
@@ -405,14 +443,16 @@ if gui:
                     background=[('active', lighten(color.red))])
 
             sty.configure('TCheckbutton',
-                          foreground='#f5f5f5', background=color.bg_main,
+                          foreground='#f5f5f5', background=color.bg_button,
                           font=bold_font, borderwidth=2,
                           relief='flat',
-                          indicatorcolor=color.bg_button,
+                          indicatorcolor=darken(color.bg_button),
                           indicatordiameter=25,
+                          indicatormargin=10,
                           indicatorrelief='flat')
+            
             sty.map('TCheckbutton',
-                    background=[('active', color.bg_main)],
+                    background=[('active', lighten(color.bg_button))],
                     indicatorcolor=[('selected', color.green)])
 
         def set_updater(self, enable):
@@ -433,10 +473,15 @@ if gui:
 
         def add_settings(self):
             frame = self.settings_frame
+
+            for widget in frame.winfo_children():
+                widget.destroy()
+
             gridargs = {
-                'pady': 20,
-                'padx': 20,
-                'sticky': 'w',
+                'ipady': 30,
+                'pady': 4,
+                'padx': 10,
+                'sticky': 'ew',
             }
 
             self.updater_var = IntVar(value=1 if path.exists(thcrap_update_dll) else 0)
@@ -464,6 +509,40 @@ if gui:
                 command=lambda *_: bugs.destroy()
             )
             bugs.grid(**gridargs)
+
+            save_colors = ttk.Button(
+                frame,
+                text='Save Colors',
+                command=lambda *_: self.save_colors())
+            save_colors.grid(**gridargs)
+
+            default_colors = ttk.Button(
+                frame,
+                text='Reset Colors',
+                command=lambda *_: self.reset_colors())
+            default_colors.grid(**gridargs)
+
+            def change_color_factory(color_name):
+                def change_color():
+                    self.change_color(color_name)
+                return change_color
+
+            color_buttons = []
+            for color_name, color in self.get_colors().items():
+                color_buttons.append(
+                    ttk.Button(
+                        frame, style='Setting.TButton',
+                        text=f'Change color {color_name} ({color})',
+                        command=change_color_factory(color_name)))
+            for i,button in enumerate(color_buttons):
+                button.grid(**gridargs, column=1, row=i)
+
+            for i in range(frame.grid_size()[1]):
+                frame.rowconfigure(i, weight=1, uniform='a')
+
+            for i in range(frame.grid_size()[0]):
+                frame.columnconfigure(i, weight=1, uniform='a')
+
 
 
         def add_bottom_buttons(self):
@@ -560,19 +639,20 @@ configs = ["no patch", "en", "es", "de", "pt", "zh", "kr", "en_troll",
            "foo", "bar", "en", "jp"]
 
 if gui:
-    try:
-        if TEST:
-            launcher = Launcher(configs[:2])
-            launcher.refresh_configs([f'Config {i}\n({i})' for i in range(20)])
-        else:
+    if TEST:
+        launcher = Launcher(configs[:2])
+        launcher.refresh_configs([f'Config {i}\n({i})' for i in range(20)])
+
+    else:
+        try:
             check_exe(GAME_EXE)
             init_thcrap()
             Launcher(['no patch', *list_configs()])
-    except Exception as e:
-        tkinter.messagebox.showerror(
-            title=f'Error in {APP_NAME}',
-            message=f'{APP_NAME} encountered an error and will now exit.\nError: {e}'
-        )
+        except Exception as e:
+            tkinter.messagebox.showerror(
+                title=f'Error in {APP_NAME}',
+                message=f'{APP_NAME} encountered an error and will now exit.\nError: {e}'
+            )
 else:
     check_exe(GAME_EXE)
     init_thcrap()
