@@ -101,7 +101,7 @@ def override_config_defaults():
 # Initial setup.
 # Run thcrap.exe instead of the game and let the user figure it out
 if not is_thcrap_installed():
-    args = sys.argv[1:-1] + [thcrap]
+    args = sys.argv[1:-1] + [thcrap, '--skip-search-games']
     subprocess.run(args, check=False)
     # Check if it was installed correctly
     if not is_thcrap_installed():

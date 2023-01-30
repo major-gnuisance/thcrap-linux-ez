@@ -173,7 +173,7 @@ def run_thcrap_config():
     if not path.exists(thcrap_config):
         os.mkdir(thcrap_config)
         override_config_defaults()
-    args = sys.argv[1:-1] + [thcrap]
+    args = sys.argv[1:-1] + [thcrap, '--skip-search-games']
     subprocess.run(args, check=False)
 
 def load_settings():
