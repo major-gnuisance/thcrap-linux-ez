@@ -4,19 +4,20 @@ thcrap_auto_gui: auto-loader for thcrap on Linux, now with GUI!
 
 Usage on Steam:
 1. Put this file in ~/thcrap_auto_gui.py
-2. In Steam, use this for command line arguments: ~/thcrap_auto_gui.py %command%
+2. In Steam, use this for command line arguments:
+python3 ~/thcrap_auto_gui.py --gui %command%
 
-On first launch, thcrap will be downloaded.
+Thcrap will be downloaded automatically when needed.
 
 Add patch configurations via the thcrap configurator utility (Thcrap
 Config button).
-Don't try to add games in the "Find games" screen; when done with the
-thcrap configurator, just click Cancel.
 
-Any configurations you've added will automatically appear in the
-launcher. Click the one you want to use, then "Start Game".
+Any patch configurations you've added will automatically appear in the
+launcher. Select the one you want, then click "Play".
+
 """
 
+import argparse
 import io
 import os
 import shutil
@@ -34,27 +35,90 @@ try:
 except NameError:
     TEST = False
 
-# Eventually set this based on options & args
-gui = True
+APP_ID = "thcrap-launcher"
+APP_NAME = "Thcrap Launcher"
+APP_DESCRIPTION = "Launcher for Touhou Games using Thcrap, for Steam on Linux or Wine."
+HELP_EPILOG = """If unset, XDG_DATA_DIR defaults to ~/.local/share
 
-APP_NAME="Unnamed Thcrap Launcher"
+The positional arguments are supposed to come from a %command% in the Steam launch options.
+Otherwise, it must be something equivalent to it - a command that would start the game normally, under Wine. 
+
+Paths can be absolute or relative.
+Relative paths are relative to the process working directory, usually the game directory if launched under Steam.
+Tilde expansion for home directories is applied.
+
+Examples of paths for THCRAP_DIR:
+  thcrap OR ./thcrap       - `thcrap' under the game directory.
+  ../shared_thcrap         - `shared_thcrap' in the parent of the game directory.
+  /home/deck/global_thcrap - An absolute path
+  ~/global_thcrap          - The same as above if your HOME is /home/deck
+"""
+
+XDG_DATA_DIR_DEFAULT = path.join(os.environ["HOME"], ".local", "share")
+XDG_DATA_DIR = os.environ.get("XDG_DATA_DIR", XDG_DATA_DIR_DEFAULT)
+
+XDG_CACHE_DIR_DEFAULT = path.join(os.environ["HOME"], ".cache")
+XDG_CACHE_DIR = os.environ.get("XDG_CACHE_DIR", XDG_CACHE_DIR_DEFAULT)
+
+DEFAULT_GLOBAL_THCRAP_DIR = path.join(XDG_DATA_DIR, APP_ID)
+DEFAULT_GLOBAL_THCRAP_DIR_HELP = f"$XDG_DATA_DIR/{APP_ID}"
+DEFAULT_RELATIVE_THCRAP_DIR = path.join(".", "thcrap")
+
 THCRAP_URL = 'https://github.com/thpatch/thcrap/releases/latest/download/thcrap.zip'
 
-# UNIX path to the game's executable. Must be the last argument in the
-# command line in normal use.
-GAME_EXE = sys.argv[-1]
+# Argument parsing
+parser = argparse.ArgumentParser(
+    prog = sys.argv[0] or 'thcrap_auto_gui.py',
+    description = APP_DESCRIPTION,
+    epilog = HELP_EPILOG,
+    formatter_class = argparse.RawDescriptionHelpFormatter
+)
+parser.add_argument('-g', '--gui', action='store_true',
+                    help="launch the GUI.")
+parser.add_argument('-p', '--patch',
+                    help="patch name for thcrap. Will be passed to thcrap as PATCH.js. Example: `-p en' will invoke thcrap with en.js. Use -p no_patch to run game without thcrap.",
+                    action='store',
+                    metavar='PATCH')
+parser.add_argument('-c', '--thcrap-configurator', action='store_true',
+                    help='Run the thcrap configurator and exit.')
+parser.add_argument('-d', '--thcrap-dir',
+                    help=f'directory where thcrap will be located.',
+                    action='store',
+                    metavar='THCRAP_DIR',
+                    default=DEFAULT_GLOBAL_THCRAP_DIR)
+parser.add_argument('--global', action='store_const',
+                    help=f'''use default absolute thcrap dir. Same as `--thcrap-dir "{DEFAULT_GLOBAL_THCRAP_DIR_HELP}"'. Default behaviour.''',
+                    dest='thcrap_dir',
+                    const=DEFAULT_GLOBAL_THCRAP_DIR)
+parser.add_argument('--relative', action='store_const',
+                    help=f'''use default relative thcrap dir. Same as `--thcrap-dir {DEFAULT_RELATIVE_THCRAP_DIR}\'''',
+                    dest='thcrap_dir',
+                    const=DEFAULT_RELATIVE_THCRAP_DIR)
+
+
+parser.add_argument('args', nargs='+',
+                    help='Arbitrary command line arguments that will be executed verbatim when launching the game or thcrap.')
+parser.add_argument('game_exe',
+                    metavar='GAME.exe',
+                    help='UNIX path to game executable. Must be the very last argument.')
+
+if not TEST:
+    args = parser.parse_args()
+else:
+    args = parser.parse_args(['--gui', 'foo', 'bar.exe'])
+    parser.print_help()
+
+# Whether or not to use the GUI
+gui = args.gui
+
+# UNIX path to the game's executable.
+game_exe = args.game_exe
 
 # Base directory for thcrap
-thcrap_dir = path.join(".", "thcrap")
-
-# The base directory can be replaced with an absolute path to use a
-# global thcrap dir
-
-# Example of global dir: ~/.thcrap
-#thcrap_dir = path.join(os.environ["HOME"], ".thcrap")
+thcrap_dir = args.thcrap_dir
 
 # Path to a cached thcrap.zip, to avoid redownloads. Used during development.
-thcrap_zip_cache = path.join(os.environ["HOME"], ".cache", "thcrap", "thcrap.zip")
+thcrap_zip_cache = path.join(XDG_CACHE_DIR, APP_ID, "thcrap.zip")
 
 thcrap = path.join(thcrap_dir, "thcrap.exe")
 thcrap_loader = path.join(thcrap_dir, "thcrap_loader.exe")
@@ -106,6 +170,7 @@ def init_thcrap(thcrap=thcrap,
     # Make thcrap directory
     if not path.isdir(thcrap_dir):
         Path(thcrap_dir).mkdir(parents=True)
+        # TODO: use mode 700 if creating app dir under $XDG_DATA_DIR, per XDG Base Directory Specification.
 
     # Install thcrap if it doesn't already exist
     if not path.exists(thcrap):
@@ -173,8 +238,8 @@ def run_thcrap_config():
     if not path.exists(thcrap_config):
         os.mkdir(thcrap_config)
         override_config_defaults()
-    args = sys.argv[1:-1] + [thcrap, '--skip-search-games']
-    subprocess.run(args, check=False)
+    run_args = args.args + [thcrap, '--skip-search-games']
+    subprocess.run(run_args, check=False)
 
 def load_settings():
     return load_json(launcher_settings_path)
@@ -191,17 +256,17 @@ def set_lastrun(config_name):
     save_settings(load_settings() | {'last_run': config_name})
 
 def exec_game(config="en"):
-    if config != 'no patch':
+    if config not in ('no patch', 'no_patch'):
         # Relative path to game exe, from thcrap dir.
         # Usually something like "../thXX.exe"
-        game_exe_rel = os.path.relpath(GAME_EXE, thcrap_dir)
+        game_exe_rel = os.path.relpath(game_exe, thcrap_dir)
 
         # Build the modified command line.
-        new_command_line = sys.argv[1:-1] + [thcrap_loader, f'{config}.js', game_exe_rel]
+        new_command_line = args.args + [thcrap_loader, f'{config}.js', game_exe_rel]
     else:
         # Launch game unpatched, in Japanese locale
         os.environ["LANG"]="ja_JP.UTF-8"
-        new_command_line = sys.argv[1:]
+        new_command_line = args.args + [game_exe]
 
     ##### Aside #####
     # The line above turns a command line like:
@@ -645,7 +710,7 @@ if gui:
 
     else:
         try:
-            check_exe(GAME_EXE)
+            check_exe(game_exe)
             init_thcrap()
             Launcher(['no patch', *list_configs()])
         except Exception as e:
@@ -654,6 +719,14 @@ if gui:
                 message=f'{APP_NAME} encountered an error and will now exit.\nError: {e}'
             )
 else:
-    check_exe(GAME_EXE)
+    first_run = not path.exists(thcrap_config)
     init_thcrap()
-    exec_game(list_configs()[0])
+    if args.thcrap_configurator:
+        run_thcrap_config()
+        sys.exit()
+    elif first_run:
+        run_thcrap_config()
+
+    check_exe(game_exe)
+    if args.patch in list_configs():
+        exec_game(args.patch)
